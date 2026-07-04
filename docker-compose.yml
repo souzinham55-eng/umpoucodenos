@@ -1,0 +1,91 @@
+version: '3.9'
+
+services:
+  # Aplicação Node.js
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: umpoucodenos-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=sqlite:/app/data/messages.db
+    volumes:
+      - ./data:/app/data
+      - ./index.html:/app/index.html
+      - ./js:/app/js
+      - ./manifest.json:/app/manifest.json
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - umpoucodenos-network
+    depends_on:
+      - db
+
+  # Banco de dados SQLite (persistência)
+  db:
+    image: keinos/sqlite3:latest
+    container_name: umpoucodenos-db
+    volumes:
+      - ./data:/data
+    networks:
+      - umpoucodenos-network
+
+  # Nginx como reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: umpoucodenos-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - umpoucodenos-network
+
+  # Redis para cache (opcional)
+  redis:
+    image: redis:7-alpine
+    container_name: umpoucodenos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - umpoucodenos-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Backup automático do banco de dados
+  backup:
+    image: node:18-alpine
+    container_name: umpoucodenos-backup
+    volumes:
+      - ./data:/backup/data
+    command: sh -c "while true; do cp -r /backup/data /backup/data-backup-$(date +%s) && sleep 86400; done"
+    restart: unless-stopped
+    networks:
+      - umpoucodenos-network
+
+networks:
+  umpoucodenos-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
